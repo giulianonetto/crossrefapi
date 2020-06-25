@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from crossref import validators, VERSION
 
-LIMIT = 100
+LIMIT = 1000
 MAXOFFSET = 10000
 FACETS_MAX_LIMIT = 1000
 
@@ -57,7 +57,7 @@ class HTTPRequest(object):
     def throttling_time(self):
         return self.rate_limits['X-Rate-Limit-Interval'] / self.rate_limits['X-Rate-Limit-Limit']
 
-    def do_http_request(self, method, endpoint, data=None, files=None, timeout=100, only_headers=False, custom_header=None):
+    def do_http_request(self, method, endpoint, data=None, files=None, timeout=1200, only_headers=False, custom_header=None):
 
         if only_headers is True:
             return requests.head(endpoint)
@@ -74,7 +74,18 @@ class HTTPRequest(object):
         if method == 'post':
             result = action(endpoint, data=data, files=files, timeout=timeout, headers=headers)
         else:
-            result = action(endpoint, params=data, timeout=timeout, headers=headers)
+            try:
+                result = action(endpoint, params=data, timeout=timeout, headers=headers)
+            except:
+                sleep(300)
+                try:
+                    result = action(endpoint, params=data, timeout=timeout, headers=headers)
+                except:
+                    _input = input("Operation failed twice. Should it continue? (y/n)")
+                    if _input == "y":
+                        result = action(endpoint, params=data, timeout=timeout, headers=headers)
+                    else:
+                        result = None
 
         if self.throttle is True:
             self._update_rate_limits(result.headers)
@@ -264,6 +275,9 @@ class Endpoint:
                 custom_header=self.custom_header
             )
 
+            if result is None:
+                return
+
             if result.status_code == 404:
                 raise StopIteration()
 
@@ -290,7 +304,6 @@ class Endpoint:
                     raise StopIteration()
 
                 result = result.json()
-
                 if len(result['message']['items']) == 0:
                     return
 
@@ -311,7 +324,17 @@ class Endpoint:
                 )
 
                 if result.status_code == 404:
-                    raise StopIteration()
+                    print('Got 404! Waiting to try again...')
+                    sleep(10)
+                    result = self.do_http_request(
+                        'get',
+                        request_url,
+                        data=request_params,
+                        custom_header=self.custom_header
+                    )
+                    if result.status_code == 404:
+                        print("OMG! Nothing worked!")
+                        raise StopIteration()
 
                 result = result.json()
 
